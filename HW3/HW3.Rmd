@@ -1,0 +1,238 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+# Last update: 23/11/2022
+# By: @qinquan cui
+# email: qcui@london.edu; quark.tsui@gmail.com
+
+################ Question 2(a) #######################
+
+```{r load-package1}
+library(pacman)
+p_load(data.table, fixest, lattice, magrittr, ggplot2, kableExtra, xlsx, 
+       stargazer, Rfast)
+```
+
+
+```{r create index}
+## Define my working directory
+setwd("~/Documents/R_quark/P218-Econometrics")
+elety <- read.xlsx("Nerlove1963.xlsx", 1)
+# options(digits=5)
+
+reg_dat <- lm(log(Cost) ~ log(output) + I((log(output))^2)+ log(Plabor) + log(Pcapital) + log(Pfuel), data=elety)
+summary(reg_dat)
+
+beta_out_2 <- reg_dat$coefficients[3]
+sd_beta_out_2 <- coef(summary(reg_dat))["I((log(output))^2)", "Std. Error"]
+
+t_val <- beta_out_2/sd_beta_out_2
+print(t_val)
+# stargazer(reg_dat, type="latex", title="Regression results for the modification")
+
+```
+
+################ Question 2(b) #######################
+
+```{r examine the data}
+log_Q <- log(elety$output)
+max_beta <- Rfast::nth(log_Q, 11, descending = T) # the nth highest value
+min_beta <- Rfast::nth(log_Q, 11, descending = F) # the nth smallest value
+#sort(log_Q, TRUE)[11] 
+#sort(log_Q, FALSE)[11] 
+
+
+################ Question 2(c) #######################
+## Parameters and seed
+set.seed(12) # Seed
+n = seq(from=min_beta, to=max_beta, by=0.005662)  
+N = length(n)                      
+## Storage 
+SSR <- matrix(NA, N, 1) 
+
+
+## select beta_7
+for (i in 1:N){
+  # Generate data
+  z_i = log_Q/(1+exp(n[i]-log_Q))
+  
+  # Formulate data.table
+  
+  data_i = data.table(y=log(elety$Cost)-log(elety$Plabor),
+                     output=log(elety$output),
+                     log_cl=log(elety$Pcapital)-log(elety$Plabor), 
+                     log_fl=log(elety$Pfuel)-log(elety$Plabor), z=z_i) 
+  
+  
+  # Run regression
+  nls <- lm(y ~ output + log_cl + log_fl + z, data=data_i)
+
+  # Extract residuals and save
+  resids <- resid(nls)
+  SSR[i] <- sum(resids^2) 
+}
+
+# the index of the smallest SSR
+min_SSR <- Rfast::nth(SSR, 1, descending = F,index.return = TRUE) 
+beta_7 = n[min_SSR]
+print(beta_7)
+
+# show the regression results of the smallest SSR
+nl_val = log_Q/(1+exp(beta_7-log_Q))
+dat_est = data.table(y=log(elety$Cost)-log(elety$Plabor),
+                     output=log(elety$output),
+                     log_cl=log(elety$Pcapital)-log(elety$Plabor), 
+                     log_fl=log(elety$Pfuel)-log(elety$Plabor), Z=nl_val)
+
+nls_opt <- lm(y ~ output  + log_cl + log_fl + Z, data=dat_est)
+
+summary(nls_opt)
+
+################ Question 2(d) #######################
+M = 145
+vec_1s <- rep(1, M)
+#matrix(vec_1s)
+#Z_ets <- log_Q/(1+exp(beta_7-log_Q))
+beta_6 = 0.2279
+df_beta7 <- -beta_6*log_Q*(exp(beta_7-log_Q))/(1-exp(beta_7-log_Q))^2
+
+
+dat_df <- data.table(cont=matrix(vec_1s), log_QT=log(elety$output), 
+                     log_PL=log(elety$Plabor), log_PK=log(elety$Pcapital),
+                     log_PF=log(elety$Pfuel), df_6=nl_val, df_7=df_beta7)
+
+Df <- data.frame(dat_df)
+DF <- data.matrix(DF)
+
+my.sum = matrix(0, 7, 7)
+for (j in 1:M){
+  vec <- matrix(c(DF[j,]))
+  h   <- vec %*% t(vec)
+  #current = solve(h)
+  my.sum = h + my.sum
+} 
+
+print(my.sum)
+
+sum_aveg <- my.sum/M       # mean of h %*% h'
+sigma_2  <- min_SSR/(M-6)  # standard error
+print(sum_aveg)
+
+inverse <- solve(sum_aveg) # the inverse
+beta_sd <- sqrt( sigma_2*diag(inverse) )
+print(beta_sd)
+
+```
+
+################ Question 6 #######################
+
+```{r load-package2}
+library(pacman)
+p_load(data.table, fixest, lattice, magrittr, ggplot2, kableExtra, xlsx, 
+       stargazer, Rfast, dynlm, lmtest, sandwich)
+```
+
+
+```{r test-hypothesis in Q6(a)}
+## Define my working directory
+setwd("~/Documents/R_quark/P218-Econometrics")
+comsump <- read.xlsx("PS4data.xls", 1)
+# options(digits=5)
+
+# define consumption variable
+comsump_per <- (comsump$real.consumption.of.nondurables
+                + comsump$real.consumption.of.services)/comsump$population
+N <- length(comsump_per)
+# unrestricted model
+consum_AR4 <- dynlm( ts(comsump_per) ~ L(ts(comsump_per), 1) + L(ts(comsump_per), 2) 
+                     + L(ts(comsump_per), 3) + L(ts(comsump_per), 4) )
+# coeftest(consum_AR2, vcov. = sandwich)
+summary(consum_AR4)
+# stargazer(consum_AR4, type="latex", title="Regression results of the unrestricted model")
+
+# restricted model
+consum_AR1 <- dynlm( ts(comsump_per) ~ L(ts(comsump_per), 1) )
+summary(consum_AR1)
+
+redsids_AR1 <- resid(consum_AR1)
+redsids_AR4 <- resid(consum_AR4)
+SSR_AR1 <- sum(redsids_AR1^2)
+SSR_AR4 <- sum(redsids_AR4^2)
+
+# W/p statistics, F statistic
+F = ( (SSR_AR1-SSR_AR4)/3 )/( (SSR_AR4)/(N-4-5) )
+print( paste('F =', F) )
+
+```
+
+
+```{r test-hypothesis in Q6(c)}
+## Define my working directory
+setwd("~/Documents/R_quark/P218-Econometrics")
+comsump <- read.xlsx("PS4data.xls", 1)
+# options(digits=5)
+
+# define regression variables
+comsump_per <- log( (comsump$real.consumption.of.nondurables
+                + comsump$real.consumption.of.services)/comsump$population )
+log_comsump_per <- log( (comsump$real.consumption.of.nondurables
+                + comsump$real.consumption.of.services)/comsump$population )
+
+incom_per <- log( (comsump$real.disposable.income)/(comsump$population) )
+
+# stage 1 of 2SLS, regresson on instruments
+incom_est <- dynlm( ts(incom_per) ~ I(log(L(ts(comsump_per), 2)/L(ts(comsump_per), 3)))
+                    + I(log(L(ts(comsump_per), 3)/L(ts(comsump_per), 4)) ) 
+                    + I(log(L(ts(comsump_per), 4)/L(ts(comsump_per), 5)) )
+                    + I(log(L(ts(comsump_per), 5)/L(ts(comsump_per), 6))), data=comsump)
+summary(incom_est)
+fit_incom <- fitted(incom_est)
+resid_u <- resid(incom_est)
+
+# stage 2 of 2SLS
+consump_2s <- comsump[-c(1:7), ]
+#consump_2s$log_incom <- fit_incom
+log_comsump_2s <- log( (comsump_2s$real.consumption.of.nondurables
+                + comsump_2s$real.consumption.of.services)/comsump_2s$population )
+
+
+vec_incom <- rep(NA, 213)
+vec_consu <- rep(NA, 213)
+for (i in 1:213){
+  vec_incom[i] <- fit_incom[i+1]-fit_incom[i]
+  vec_consu[i] <- log_comsump_2s[i+1]-log_comsump_2s[i]
+} 
+
+reg_2s <- lm(vec_consu ~ vec_incom)
+summary(reg_2s)
+
+# stargazer(reg_2s, type="latex", title="Regression results of 2SLS")
+
+
+#######6(d)##########
+resd <- as.matrix(resid_u)
+residual_u <- resd[-c(1:1), ]
+reg_endo1 <- lm(vec_consu ~ vec_incom + residual_u)
+reg_endo2 <- lm(vec_consu ~ vec_incom)
+
+redsids_endo1 <- resid(reg_endo1)
+redsids_endo2 <- resid(reg_endo2)
+SSR_endo1 <- sum(redsids_endo1^2)
+SSR_endo2 <- sum(redsids_endo2^2)
+
+# W/p statistics, F statistic
+F_endo = ( (SSR_endo2-SSR_endo1)/1 )/( (SSR_endo1)/(213-3) )
+print( paste('F_endo =', F_endo) )
+
+summary(reg_endo)
+
+# stargazer(reg_endo, type="latex", title="Regression results of 2SLS")
+
+```
+
+
+
+
+
+
